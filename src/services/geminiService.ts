@@ -1,4 +1,4 @@
-import { OCR_SYSTEM_PROMPT, TESTCASE_GENERATOR_PROMPT } from '../constants/prompts';
+import { OCR_SYSTEM_PROMPT, DIFFERENTIAL_TEST_PROMPT } from '../constants/prompts';
 import type { Testcase } from '../types/judge';
 import type { ProblemStatement } from '../types/problem';
 
@@ -348,27 +348,134 @@ export async function ocrProblemImage(
   return { rawMarkdown: rawText, problem };
 }
 
+export interface DifferentialTestSuite {
+  referenceCode: string;
+  inputGeneratorJs: string;
+}
+
+const RANDOM_HELPERS = {
+  randInt(min: number, max: number): number {
+    const lo = Math.ceil(min);
+    const hi = Math.floor(max);
+    return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+  },
+  randFloat(min: number, max: number, decimals: number = 2): number {
+    const val = Math.random() * (max - min) + min;
+    return Number(val.toFixed(decimals));
+  },
+  randArray(len: number, min: number, max: number): number[] {
+    const arr: number[] = [];
+    for (let i = 0; i < len; i++) {
+      arr.push(RANDOM_HELPERS.randInt(min, max));
+    }
+    return arr;
+  },
+  randPermutation(n: number, oneIndexed: boolean = true): number[] {
+    const arr = Array.from({ length: n }, (_, i) => (oneIndexed ? i + 1 : i));
+    for (let i = n - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  },
+  randString(len: number, alphabet: string = 'abcdefghijklmnopqrstuvwxyz'): string {
+    let out = '';
+    for (let i = 0; i < len; i++) {
+      out += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+    }
+    return out;
+  },
+  randTree(n: number, oneIndexed: boolean = true): Array<[number, number]> {
+    const perm = RANDOM_HELPERS.randPermutation(n, oneIndexed);
+    const edges: Array<[number, number]> = [];
+    for (let i = 1; i < n; i++) {
+      const parentIdx = Math.floor(Math.random() * i);
+      edges.push([perm[parentIdx], perm[i]]);
+    }
+    return edges;
+  },
+  choice<T>(arr: T[]): T {
+    return arr[Math.floor(Math.random() * arr.length)];
+  },
+};
+
 /**
- * Generate testcases quickly using Gemini AI
+ * Execute the AI-authored JS random input generator locally to produce genuine random subtests
  */
-export async function generateTestcasesWithGemini(
+export function runRandomInputGenerator(
+  inputGeneratorJs: string,
+  count: number,
+  languageCode: 'en' | 'vi' = 'vi'
+): Testcase[] {
+  let body = (inputGeneratorJs || '').trim();
+  // Strip accidental markdown fences
+  body = body.replace(/^```(?:js|javascript)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // If AI wrapped it in `function ...(testIndex, totalTests, helpers) { ... }`, invoke it
+  const isNamedOrArrowFunc = /^(?:function\b|\([^)]*\)\s*=>)/.test(body);
+  const fn = isNamedOrArrowFunc
+    ? (new Function('testIndex', 'totalTests', 'helpers', `const __gen = ${body}; return __gen(testIndex, totalTests, helpers);`) as (
+        testIndex: number,
+        totalTests: number,
+        helpers: typeof RANDOM_HELPERS
+      ) => unknown)
+    : (new Function('testIndex', 'totalTests', 'helpers', body) as (
+        testIndex: number,
+        totalTests: number,
+        helpers: typeof RANDOM_HELPERS
+      ) => unknown);
+
+  const stamp = Date.now();
+  const tests: Testcase[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const raw = fn(i, count, RANDOM_HELPERS);
+    const inputStr = (raw === undefined || raw === null ? '' : String(raw)).trim();
+    const type: Testcase['type'] = i === 0 ? 'edge' : i === count - 1 ? 'stress' : 'random';
+    const labelPrefix = type === 'edge' ? 'Edge' : type === 'stress' ? 'Stress' : 'Random';
+
+    tests.push({
+      id: `rand-${stamp}-${i + 1}`,
+      name: `${labelPrefix} #${i + 1}`,
+      input: inputStr,
+      expectedOutput: '',
+      type,
+      isSample: false,
+      description:
+        languageCode === 'vi'
+          ? 'Subtest random (đối chứng Code AI vs Code bạn)'
+          : 'Random subtest (AI Code vs Your Code)',
+    });
+  }
+
+  return tests;
+}
+
+/**
+ * Generate AI reference solution code + JS random input generator
+ */
+export async function generateDifferentialTestSuite(
   apiKey: string,
   problem: ProblemStatement,
+  language: string = 'C++17 (GCC)',
   count: number = 10,
   customInstructions?: string,
   model: string = 'gemini-2.5-flash',
+  includeComments: boolean = false,
   onProgress?: (status: string, percent: number) => void,
   signal?: AbortSignal
-): Promise<Testcase[]> {
-  onProgress?.('Đang gửi yêu cầu sinh test...', 20);
+): Promise<DifferentialTestSuite> {
+  onProgress?.('Đang gửi yêu cầu AI viết Code chuẩn & Bộ sinh Random...', 20);
   const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey.trim()}`;
 
-  const prompt = TESTCASE_GENERATOR_PROMPT(
+  const prompt = DIFFERENTIAL_TEST_PROMPT(
     problem.title,
     problem.markdown,
     problem.timeLimit,
     problem.memoryLimit,
+    language,
     count,
+    includeComments,
     customInstructions
   );
 
@@ -384,7 +491,7 @@ export async function generateTestcasesWithGemini(
     },
   };
 
-  onProgress?.('Gemini đang suy luận các trường hợp biên & bẫy tràn số...', 55);
+  onProgress?.('Gemini đang viết Code lời giải & hàm Random Input...', 55);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -395,56 +502,34 @@ export async function generateTestcasesWithGemini(
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Lỗi sinh test case (${response.status})`);
+    throw new Error(err.error?.message || `Lỗi tạo Code AI & bộ sinh random (${response.status})`);
   }
 
-  onProgress?.('Đang giải mã và định dạng bộ test...', 85);
+  onProgress?.('Đang giải mã Code AI & khởi tạo subtest random...', 85);
 
   const data = await response.json();
   const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  let rawList: any[] = [];
-  try {
-    const parsed = extractJsonFromResponse(rawText);
-    if (Array.isArray(parsed)) {
-      rawList = parsed;
-    } else if (parsed && typeof parsed === 'object') {
-      if (Array.isArray(parsed.testcases)) rawList = parsed.testcases;
-      else if (Array.isArray(parsed.tests)) rawList = parsed.tests;
-      else if (Array.isArray(parsed.cases)) rawList = parsed.cases;
-      else if (Array.isArray(parsed.testCases)) rawList = parsed.testCases;
-      else if (Array.isArray(parsed.data)) rawList = parsed.data;
-    }
-  } catch (err) {
-    // Attempt direct regex extraction from raw text
-    const regexTests = extractTestcasesWithRegex(rawText);
-    if (regexTests.length > 0) {
-      rawList = regexTests;
-    } else {
-      throw err;
-    }
+  const parsed = extractJsonFromResponse(rawText);
+
+  let referenceCode = String(parsed?.referenceCode || '').trim();
+  const codeMatch = referenceCode.match(/```[a-z0-9_+-]*\s*([\s\S]*?)\s*```/i);
+  if (codeMatch) referenceCode = codeMatch[1].trim();
+
+  if (!includeComments && referenceCode) {
+    referenceCode = stripComments(referenceCode, language);
   }
 
-  if (rawList.length === 0) {
-    const regexTests = extractTestcasesWithRegex(rawText);
-    if (regexTests.length > 0) {
-      rawList = regexTests;
-    } else {
-      throw new Error('Dữ liệu test cases không phải là danh sách hợp lệ.');
-    }
+  const inputGeneratorJs = String(parsed?.inputGeneratorJs || '').trim();
+
+  if (!referenceCode) {
+    throw new Error('AI không trả về mã nguồn lời giải (referenceCode).');
+  }
+  if (!inputGeneratorJs) {
+    throw new Error('AI không trả về hàm sinh input ngẫu nhiên (inputGeneratorJs).');
   }
 
-  const result: Testcase[] = rawList.map((item, idx) => ({
-    id: `ai-${Date.now()}-${idx + 1}`,
-    name: item.name || `Test ${idx + 1}`,
-    input: (item.input ?? '').toString().trim(),
-    expectedOutput: (item.expectedOutput ?? item.output ?? '').toString().trim(),
-    type: item.type || (idx < 2 ? 'sample' : idx < 5 ? 'edge' : idx < 8 ? 'stress' : 'tricky'),
-    isSample: item.type === 'sample' || idx === 0,
-    description: item.description || '',
-  }));
-
-  onProgress?.('Hoàn thành sinh bộ test!', 100);
-  return result;
+  onProgress?.('Hoàn tất viết Code AI & bộ sinh Random!', 100);
+  return { referenceCode, inputGeneratorJs };
 }
 
 /**

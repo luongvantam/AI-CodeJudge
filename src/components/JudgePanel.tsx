@@ -13,6 +13,8 @@ import {
   FolderArchive,
   Layers,
   X,
+  Shuffle,
+  Code2,
 } from 'lucide-react';
 import type { JudgeSummaryStats, Testcase, TestcaseResult, Verdict } from '../types/judge';
 import { TRANSLATIONS, type LanguageCode } from '../constants/translations';
@@ -37,6 +39,12 @@ interface JudgePanelProps {
   aiGenPercent?: number;
   aiGenTotalCount?: number;
   onCancelAiGen?: () => void;
+  // Differential Testing (AI Reference Code + Random Subtests)
+  aiReferenceCode?: string;
+  aiReferenceLangName?: string;
+  hasRandomGenerator?: boolean;
+  onReRollRandomTests?: () => void;
+  onClearAiReference?: () => void;
   appTheme?: 'light' | 'dark';
   languageCode?: LanguageCode;
 }
@@ -60,10 +68,16 @@ export const JudgePanel: React.FC<JudgePanelProps> = ({
   aiGenPercent = 0,
   aiGenTotalCount = 10,
   onCancelAiGen,
+  aiReferenceCode = '',
+  aiReferenceLangName = '',
+  hasRandomGenerator = false,
+  onReRollRandomTests,
+  onClearAiReference,
   appTheme = 'light',
   languageCode = 'en',
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAiCodePreview, setShowAiCodePreview] = useState(false);
   const [newTestName, setNewTestName] = useState('');
   const [newTestInput, setNewTestInput] = useState('');
   const [newTestExpected, setNewTestExpected] = useState('');
@@ -140,6 +154,8 @@ export const JudgePanel: React.FC<JudgePanelProps> = ({
         return <span className="text-[10px] bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200 px-1.5 py-0.5 rounded font-semibold">Sample</span>;
       case 'edge':
         return <span className="text-[10px] bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-200 px-1.5 py-0.5 rounded font-semibold">Edge</span>;
+      case 'random':
+        return <span className="text-[10px] bg-cyan-100 text-cyan-800 dark:bg-cyan-900/60 dark:text-cyan-200 px-1.5 py-0.5 rounded font-semibold">Random</span>;
       case 'stress':
         return <span className="text-[10px] bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200 px-1.5 py-0.5 rounded font-semibold">Stress</span>;
       case 'tricky':
@@ -282,6 +298,63 @@ export const JudgePanel: React.FC<JudgePanelProps> = ({
             <RefreshCw className="w-3 h-3 animate-spin text-[#2980b9]" />
             <span className="truncate">{aiGenStatus || 'Processing...'}</span>
           </div>
+        </div>
+      )}
+
+      {/* Differential Testing Banner (AI Code vs User Code) */}
+      {aiReferenceCode && !isAiGeneratingTests && (
+        <div className={`px-3 py-2 border-b text-xs shrink-0 ${
+          appTheme === 'dark' ? 'bg-[#172a20] border-[#244a36] text-emerald-200' : 'bg-[#ecfdf5] border-[#a7f3d0] text-emerald-900'
+        }`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 font-semibold">
+              <Code2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+              <span>
+                {languageCode === 'vi'
+                  ? `Đối chứng: Code AI (${aiReferenceLangName || 'AI'}) ↔ Code của bạn`
+                  : `Differential Mode: AI Code (${aiReferenceLangName || 'AI'}) ↔ Your Code`}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {hasRandomGenerator && onReRollRandomTests && (
+                <button
+                  onClick={onReRollRandomTests}
+                  disabled={isRunning}
+                  className="btn-classic btn-default text-[11px] py-0.5 px-2 flex items-center gap-1 disabled:opacity-50"
+                  title={languageCode === 'vi' ? 'Sinh lại các subtest random mới' : 'Re-roll fresh random subtests'}
+                >
+                  <Shuffle className="w-3 h-3 text-cyan-600" />
+                  <span>{languageCode === 'vi' ? 'Random lại' : 'Re-roll'}</span>
+                </button>
+              )}
+              <button
+                onClick={() => setShowAiCodePreview(!showAiCodePreview)}
+                className="btn-classic btn-default text-[11px] py-0.5 px-2 flex items-center gap-1"
+              >
+                <Eye className="w-3 h-3 text-emerald-600" />
+                <span>{showAiCodePreview ? (languageCode === 'vi' ? 'Ẩn Code AI' : 'Hide AI Code') : (languageCode === 'vi' ? 'Xem Code AI' : 'View AI Code')}</span>
+              </button>
+              {onClearAiReference && (
+                <button
+                  onClick={() => {
+                    setShowAiCodePreview(false);
+                    onClearAiReference();
+                  }}
+                  className="text-gray-400 hover:text-red-500 p-0.5"
+                  title={languageCode === 'vi' ? 'Tắt chế độ đối chứng Code AI' : 'Clear AI Reference Code'}
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          {showAiCodePreview && (
+            <pre className={`mt-2 p-2 rounded border font-mono text-[11px] max-h-48 overflow-auto whitespace-pre ${
+              appTheme === 'dark' ? 'bg-[#1e1e1e] border-[#333] text-gray-200' : 'bg-white border-emerald-200 text-gray-800'
+            }`}>
+              {aiReferenceCode}
+            </pre>
+          )}
         </div>
       )}
 

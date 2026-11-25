@@ -24,14 +24,19 @@ HÃY ĐẢM BẢO:
 }
 `;
 
-export const TESTCASE_GENERATOR_PROMPT = (
+export const DIFFERENTIAL_TEST_PROMPT = (
   problemTitle: string,
   problemMarkdown: string,
   timeLimit: number,
   memoryLimit: number,
+  language: string,
   count: number,
+  includeComments: boolean,
   customInstructions?: string
-) => `Sinh nhanh đúng ${count} bộ test case cho bài toán Competitive Programming sau:
+) => `Bạn là chuyên gia Lập trình thi đấu (Competitive Programming).
+Nhiệm vụ của bạn gồm 2 phần cho bài toán sau:
+1. Viết mã nguồn lời giải chuẩn xác, tối ưu bằng ngôn ngữ ${language} ("referenceCode").
+2. Viết một hàm JavaScript sinh dữ liệu đầu vào (input) ngẫu nhiên ("inputGeneratorJs") để chạy đối chứng giữa code AI và code người dùng. TUYỆT ĐỐI KHÔNG tự tính hay sinh expectedOutput.
 
 Tiêu đề: ${problemTitle}
 Giới hạn: ${timeLimit}s, ${memoryLimit}MB
@@ -42,16 +47,27 @@ ${problemMarkdown}
 ${customInstructions ? `Yêu cầu bổ sung: ${customInstructions}` : ''}
 
 QUY TẮC BẮT BUỘC:
-- Sinh chính xác ${count} test cases (bao gồm test ví dụ, test biên nhỏ nhất, test ngẫu nhiên, test lớn tối đa, test bẫy tràn số 64-bit).
-- Đầu ra BẮT BUỘC là JSON hợp lệ theo đúng cấu trúc mẫu sau (Escape ký tự xuống dòng thành \\n trong chuỗi input và expectedOutput):
+1. "referenceCode":
+   - ${includeComments ? 'Thêm comment ngắn gọn giải thích thuật toán.' : 'TUYỆT ĐỐI KHÔNG viết comment (//, /* */, #) trong mã nguồn.'}
+   - Dùng Fast I/O, xử lý kiểu dữ liệu 64-bit tránh tràn số, đọc/ghi chuẩn theo đề bài.
+2. "inputGeneratorJs":
+   - Là phần thân (body) của một hàm JavaScript nhận 3 tham số: (testIndex, totalTests, helpers).
+   - Trả về (return) đúng 1 chuỗi string là dữ liệu Input hợp lệ theo đúng định dạng và ràng buộc của đề bài.
+   - Các hàm có sẵn trong đối tượng \`helpers\`:
+     * helpers.randInt(min, max): số nguyên ngẫu nhiên trong [min, max]
+     * helpers.randFloat(min, max, decimals): số thực ngẫu nhiên
+     * helpers.randArray(len, min, max): mảng len số nguyên ngẫu nhiên trong [min, max]
+     * helpers.randPermutation(n, oneIndexed): hoán vị ngẫu nhiên độ dài n (mặc định 1..n)
+     * helpers.randString(len, alphabet): chuỗi ngẫu nhiên độ dài len
+     * helpers.randTree(n, oneIndexed): mảng các cặp cạnh [u, v] của cây n đỉnh
+     * helpers.choice(arr): chọn ngẫu nhiên 1 phần tử từ mảng arr
+   - Chiến lược sinh theo \`testIndex\` (từ 0 đến totalTests - 1, tổng ${count} test):
+     * testIndex === 0: test biên nhỏ nhất (VD: N = 1 hoặc giá trị nhỏ nhất).
+     * Các test giữa: sinh kích thước và giá trị ngẫu nhiên đa dạng (có số âm/0/trùng nếu đề cho phép).
+     * testIndex === totalTests - 1: test lớn/stress (giữ kích thước hợp lý <= 2000 phần tử để sandbox chạy nhanh, trừ khi đề nhỏ hơn hoặc có yêu cầu khác).
+   - KHÔNG dùng import/require, KHÔNG dùng console.log, chỉ return string.
+3. Đầu ra BẮT BUỘC là JSON thuần túy hợp lệ theo đúng cấu trúc sau:
 {
-  "testcases": [
-    {
-      "name": "Test 1",
-      "type": "sample",
-      "input": "10\\n1 2 3",
-      "expectedOutput": "6",
-      "description": ""
-    }
-  ]
+  "referenceCode": "toàn bộ mã nguồn lời giải",
+  "inputGeneratorJs": "toàn bộ thân hàm JS kết thúc bằng return ..."
 }`;

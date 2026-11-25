@@ -342,12 +342,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                     </div>
                     <div className="space-y-1">
                       <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100">
-                        {languageCode === 'vi' ? 'Bấm "AI Sinh Test" để Tạo Bộ Test Hoàn Chỉnh' : 'Click "AI Generate Tests"'}
+                        {languageCode === 'vi' ? 'Bấm "AI Sinh Test" để Tạo Code AI & Subtest Random' : 'Click "AI Generate Tests" for Differential Testing'}
                       </h4>
                       <p className="text-gray-600 dark:text-gray-400">
                         {languageCode === 'vi'
-                          ? 'Gemini AI sẽ phân tích thuật toán, sinh nhanh các bộ test từ cận nhỏ nhất (Edge case), test lớn (Stress test) đến test bẫy tràn số (Tricky case) kèm kết quả mong đợi chính xác.'
-                          : 'Gemini AI analyzes constraints and constructs sample cases, boundary conditions, large stress tests, and 64-bit overflow traps with verified expected outputs.'}
+                          ? 'Gemini AI sẽ viết mã nguồn lời giải chuẩn (Code AI) và một bộ sinh ngẫu nhiên (JS) để tạo ra các subtest random thực sự (cận biên, ngẫu nhiên, stress) — không tự đoán đáp án.'
+                          : 'Gemini AI writes a Reference Solution (AI Code) and a JS Random Input Generator to create genuine random subtests (edge, random, stress) without guessing expected outputs.'}
                       </p>
                     </div>
                   </div>
@@ -364,8 +364,8 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                       </h4>
                       <p className="text-gray-600 dark:text-gray-400">
                         {languageCode === 'vi'
-                          ? 'Soạn mã nguồn ở cột giữa (C++, Python, Pascal...), nhấn nút xanh để chấm toàn bộ test trên Sandbox độc lập. Bạn có thể nhấn vào từng test case để so khớp Visual Diff (Output của bạn vs Đáp án chuẩn).'
-                          : 'Write your code in the middle editor (C++, Python, Pascal, Java...), hit the green judge button. Inspect visual diffs for any failing test cases.'}
+                          ? 'Soạn mã nguồn ở cột giữa (C++, Python, Pascal...), nhấn nút xanh để hệ thống chạy song song Code AI và Code của bạn trên cùng các subtest random rồi so khớp trực tiếp kết quả của hai code.'
+                          : 'Write your code in the middle editor (C++, Python, Pascal, Java...), hit the green judge button to run both AI Code and Your Code on the random subtests and compare their outputs.'}
                       </p>
                     </div>
                   </div>
@@ -436,12 +436,12 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                 <div>
                   <h3 className="text-base font-bold text-[#337ab7] flex items-center gap-2">
                     <Layers className="w-5 h-5 text-[#3498db]" />
-                    <span>{languageCode === 'vi' ? 'Chi Tiết 4 Nhóm Test Case Của AI' : 'AI Testcase Generation Strategy'}</span>
+                    <span>{languageCode === 'vi' ? 'Cơ Chế Chấm Đối Chứng (Code AI vs Code Bạn)' : 'Differential Testing Strategy (AI Code vs Your Code)'}</span>
                   </h3>
                   <p className="text-gray-500 mt-1">
                     {languageCode === 'vi'
-                      ? 'Gemini AI không chỉ tạo test ngẫu nhiên mà chủ động thiết kế các trường hợp nhằm bẫy các lỗi phổ biến trong lập trình thi đấu.'
-                      : 'Engineered testsuites covering typical CP pitfalls, corner cases, and time/memory limits.'}
+                      ? 'Thay vì để AI tự tính nhẩm output (dễ sai với bài toán phức tạp), hệ thống dùng AI viết Code chuẩn và chạy đối chứng song song với Code của bạn trên các subtest random thực sự.'
+                      : 'Instead of letting AI guess expected outputs, the system uses AI to write a reference solution and runs both AI Code and Your Code on genuine random subtests.'}
                   </p>
                 </div>
 
@@ -449,48 +449,48 @@ export const HelpModal: React.FC<HelpModalProps> = ({
                   <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-blue-900/60' : 'bg-white border-blue-200 shadow-xs'
                     }`}>
                     <span className="text-xs font-bold text-blue-600 dark:text-blue-400 block">
-                      1. Sample Tests (Test Ví Dụ)
+                      1. AI Reference Code (Code Chuẩn AI)
                     </span>
                     <p className="text-gray-600 dark:text-gray-400 text-[11px]">
                       {languageCode === 'vi'
-                        ? 'Các bộ test mẫu có trong đề bài nhằm xác thực logic giải thuật cơ sở của chương trình.'
-                        : 'Standard examples from the problem statement to verify fundamental correctness.'}
+                        ? 'AI viết mã nguồn lời giải tối ưu theo ngôn ngữ bạn chọn. Bạn có thể bấm "Xem Code AI" ngay trên bảng chấm để kiểm tra.'
+                        : 'AI writes an optimal reference solution in your selected language. Click "View AI Code" on the judge panel to inspect it anytime.'}
+                    </p>
+                  </div>
+
+                  <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-cyan-900/60' : 'bg-white border-cyan-200 shadow-xs'
+                    }`}>
+                    <span className="text-xs font-bold text-cyan-600 dark:text-cyan-400 block">
+                      2. Random Subtests (Subtest Ngẫu Nhiên)
+                    </span>
+                    <p className="text-gray-600 dark:text-gray-400 text-[11px]">
+                      {languageCode === 'vi'
+                        ? 'Hàm JavaScript sinh input ngẫu nhiên chạy ngay trên trình duyệt (Edge, Random, Stress). Bấm "Random lại" để đổi bộ test mới không tốn lượt gọi AI.'
+                        : 'A JavaScript random input generator runs locally in your browser (Edge, Random, Stress). Click "Re-roll" to generate fresh random tests instantly.'}
+                    </p>
+                  </div>
+
+                  <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-emerald-900/60' : 'bg-white border-emerald-200 shadow-xs'
+                    }`}>
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 block">
+                      3. Parallel Execution (Chạy Song Song)
+                    </span>
+                    <p className="text-gray-600 dark:text-gray-400 text-[11px]">
+                      {languageCode === 'vi'
+                        ? 'Khi chấm, cả Code AI và Code của bạn được biên dịch và thực thi song song trên Sandbox độc lập với cùng một input ngẫu nhiên.'
+                        : 'During judging, both AI Code and Your Code are compiled and executed in parallel on the sandbox with the exact same random input.'}
                     </p>
                   </div>
 
                   <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-purple-900/60' : 'bg-white border-purple-200 shadow-xs'
                     }`}>
                     <span className="text-xs font-bold text-purple-600 dark:text-purple-400 block">
-                      2. Edge Cases (Test Cận Biên)
+                      4. Output Diff (So Khớp Kết Quả)
                     </span>
                     <p className="text-gray-600 dark:text-gray-400 text-[11px]">
                       {languageCode === 'vi'
-                        ? 'Cận dưới nhỏ nhất (N = 0, N = 1), mảng toàn số âm, các phần tử giống hệt nhau, chuỗi rỗng.'
-                        : 'Smallest bounds (N = 0, N = 1), all negatives, identical elements, single character strings.'}
-                    </p>
-                  </div>
-
-                  <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-amber-900/60' : 'bg-white border-amber-200 shadow-xs'
-                    }`}>
-                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400 block">
-                      3. Stress Tests (Test Cực Đại)
-                    </span>
-                    <p className="text-gray-600 dark:text-gray-400 text-[11px]">
-                      {languageCode === 'vi'
-                        ? 'Dữ liệu lớn nhất có thể (N = 10⁵ đến 2×10⁵) để phát hiện thuật toán O(N²) bị quá thời gian (TLE).'
-                        : 'Max constraint volumes (N = 10⁵ to 2×10⁵) to catch quadratic O(N²) solutions timing out.'}
-                    </p>
-                  </div>
-
-                  <div className={`p-3.5 rounded-lg border space-y-1.5 ${appTheme === 'dark' ? 'bg-[#1e1e1e] border-red-900/60' : 'bg-white border-red-200 shadow-xs'
-                    }`}>
-                    <span className="text-xs font-bold text-red-600 dark:text-red-400 block">
-                      4. Tricky / Overflow (Bẫy Tràn Số)
-                    </span>
-                    <p className="text-gray-600 dark:text-gray-400 text-[11px]">
-                      {languageCode === 'vi'
-                        ? 'Giá trị tổng vượt quá 2×10⁹ (bắt buộc dùng số nguyên 64-bit int64 / long long), đồ thị rời rạc.'
-                        : 'Values exceeding 2×10⁹ requiring 64-bit integers, special boundary cases, disconnected graphs.'}
+                        ? 'Kết quả chạy thực tế của Code AI được dùng làm chuẩn để so sánh với kết quả chạy Code của bạn, đảm bảo độ chính xác 100%.'
+                        : 'The actual stdout of AI Code is compared directly against Your Code output, guaranteeing accurate verification.'}
                     </p>
                   </div>
                 </div>

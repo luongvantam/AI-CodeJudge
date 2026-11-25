@@ -15,8 +15,10 @@ import type { ProblemStatement } from './types/problem';
 import { DEFAULT_LANGUAGE, SUPPORTED_LANGUAGES } from './constants/languages';
 import { DEFAULT_PROBLEM } from './constants/defaultProblem';
 import { executeCode } from './services/executorService';
+import { compareOutputs } from './services/evaluatorService';
 import {
-  generateTestcasesWithGemini,
+  generateDifferentialTestSuite,
+  runRandomInputGenerator,
   generateReferenceSolution,
   diagnoseAndFixCode,
   type CodeDiagnosticError,
@@ -114,6 +116,12 @@ export const App: React.FC = () => {
   const [isGeneratingAiSolution, setIsGeneratingAiSolution] = useState<boolean>(false);
   const aiSolutionAbortControllerRef = useRef<AbortController | null>(null);
 
+  // State: Differential Testing (AI Reference Code + Random Input Generator)
+  const [aiReferenceCode, setAiReferenceCode] = useState<string>('');
+  const [aiReferenceLang, setAiReferenceLang] = useState<LanguageConfig | null>(null);
+  const [aiInputGeneratorJs, setAiInputGeneratorJs] = useState<string>('');
+  const [lastRandomCount, setLastRandomCount] = useState<number>(10);
+
   // State: AI Code Fix & Debug Agent
   const [isAiFixModalOpen, setIsAiFixModalOpen] = useState(false);
   const [isAiFixLoading, setIsAiFixLoading] = useState(false);
@@ -162,7 +170,7 @@ export const App: React.FC = () => {
     setSummary(null);
   };
 
-  // Start AI Testcase Generation (Direct fast generation in background)
+  // Start AI Differential Test Generation (AI writes Reference Code + JS Random Input Generator)
   const handleStartGenerateTests = async (
     count: number,
     mode: 'replace' | 'append',
@@ -182,22 +190,35 @@ export const App: React.FC = () => {
     setIsAiGeneratingTests(true);
     setAiGenTotalCount(count);
     setAiGenPercent(5);
-    setAiGenStatus(languageCode === 'vi' ? 'Đang phân tích bài toán...' : 'Analyzing problem statement...');
+    setAiGenStatus(
+      languageCode === 'vi'
+        ? 'AI đang viết Code chuẩn & bộ sinh subtest random...'
+        : 'AI is writing Reference Code & Random Input Generator...'
+    );
     setIsAiGeneratorOpen(false);
 
     try {
-      const generated = await generateTestcasesWithGemini(
+      const suite = await generateDifferentialTestSuite(
         apiKey,
         problem,
+        selectedLanguage.name,
         count,
         customInstructions,
         model,
+        includeComments,
         (status: string, percent: number) => {
           setAiGenStatus(status);
           setAiGenPercent(percent);
         },
         abortController.signal
       );
+
+      const generated = runRandomInputGenerator(suite.inputGeneratorJs, count, languageCode);
+
+      setAiReferenceCode(suite.referenceCode);
+      setAiReferenceLang(selectedLanguage);
+      setAiInputGeneratorJs(suite.inputGeneratorJs);
+      setLastRandomCount(count);
 
       if (mode === 'replace') {
         setTestcases(generated);
@@ -210,13 +231,35 @@ export const App: React.FC = () => {
       if (err.name === 'AbortError' || abortController.signal.aborted) {
         return;
       }
-      alert(`Lỗi tạo test case AI: ${err.message}`);
+      alert(`Lỗi tạo Code AI & subtest random: ${err.message}`);
     } finally {
       setIsAiGeneratingTests(false);
       setAiGenPercent(0);
       setAiGenStatus('');
       aiGenAbortControllerRef.current = null;
     }
+  };
+
+  // Re-roll fresh random subtests using existing JS generator (no AI API call)
+  const handleReRollRandomTests = () => {
+    if (!aiInputGeneratorJs) return;
+    try {
+      const freshRandoms = runRandomInputGenerator(aiInputGeneratorJs, lastRandomCount, languageCode);
+      setTestcases((prev) => {
+        const kept = prev.filter((tc) => tc.type === 'sample' || tc.type === 'custom');
+        return kept.length > 0 ? [...kept, ...freshRandoms] : freshRandoms;
+      });
+      setResults({});
+      setSummary(null);
+    } catch (err: any) {
+      alert(`Lỗi chạy bộ sinh random: ${err.message}`);
+    }
+  };
+
+  const handleClearAiReference = () => {
+    setAiReferenceCode('');
+    setAiReferenceLang(null);
+    setAiInputGeneratorJs('');
   };
 
   // Cancel AI Test Generation
@@ -398,32 +441,111 @@ export const App: React.FC = () => {
       }));
 
       try {
-        const rawRes = await executeCode(
-          code,
-          selectedLanguage,
-          tc.input,
-          tc.expectedOutput,
-          problem.timeLimit,
-          problem.memoryLimit,
-          judgeConfig,
-          problem.inputFile,
-          problem.outputFile
-        );
+        const shouldRunAiCode =
+          Boolean(aiReferenceCode) &&
+          (tc.type === 'random' || tc.type === 'edge' || tc.type === 'stress' || !tc.expectedOutput);
 
-        const res: TestcaseResult = {
-          testcaseId: tc.id,
-          testcaseName: tc.name,
-          input: tc.input,
-          expectedOutput: tc.expectedOutput,
-          actualOutput: rawRes.stdout,
-          verdict: rawRes.verdict,
-          timeMs: rawRes.timeMs,
-          memoryKb: rawRes.memoryKb,
-          compileError: rawRes.compileOutput,
-          errorMessage: rawRes.stderr,
-          diffSummary: rawRes.diffSummary,
-          exitCode: rawRes.exitCode,
-        };
+        let res: TestcaseResult;
+
+        if (shouldRunAiCode) {
+          const [aiRes, userRes] = await Promise.all([
+            executeCode(
+              aiReferenceCode,
+              aiReferenceLang || selectedLanguage,
+              tc.input,
+              '',
+              problem.timeLimit,
+              problem.memoryLimit,
+              judgeConfig,
+              problem.inputFile,
+              problem.outputFile
+            ),
+            executeCode(
+              code,
+              selectedLanguage,
+              tc.input,
+              '',
+              problem.timeLimit,
+              problem.memoryLimit,
+              judgeConfig,
+              problem.inputFile,
+              problem.outputFile
+            ),
+          ]);
+
+          if (aiRes.verdict === 'CE' || aiRes.verdict === 'RTE' || aiRes.verdict === 'TLE' || aiRes.verdict === 'MLE') {
+            res = {
+              testcaseId: tc.id,
+              testcaseName: tc.name,
+              input: tc.input,
+              expectedOutput: '',
+              actualOutput: userRes.stdout,
+              verdict: userRes.verdict === 'CE' ? 'CE' : 'RTE',
+              timeMs: userRes.timeMs,
+              memoryKb: userRes.memoryKb,
+              compileError: userRes.compileOutput || aiRes.compileOutput,
+              errorMessage: `[Code AI lỗi ${aiRes.verdict}]: ${aiRes.compileOutput || aiRes.stderr || ''}`,
+              exitCode: userRes.exitCode,
+            };
+          } else {
+            const aiOutput = aiRes.stdout;
+            let finalTestVerdict: Verdict = userRes.verdict;
+            let diffSummary = userRes.diffSummary;
+
+            if (userRes.verdict === 'AC' || userRes.verdict === 'WA') {
+              const comp = compareOutputs(userRes.stdout, aiOutput);
+              finalTestVerdict = comp.isMatch ? 'AC' : 'WA';
+              diffSummary = comp.diffSummary;
+            }
+
+            // Store AI code output on testcase for DiffModal & ZIP export
+            setTestcases((prev) =>
+              prev.map((item) => (item.id === tc.id ? { ...item, expectedOutput: aiOutput } : item))
+            );
+
+            res = {
+              testcaseId: tc.id,
+              testcaseName: tc.name,
+              input: tc.input,
+              expectedOutput: aiOutput,
+              actualOutput: userRes.stdout,
+              verdict: finalTestVerdict,
+              timeMs: userRes.timeMs,
+              memoryKb: userRes.memoryKb,
+              compileError: userRes.compileOutput,
+              errorMessage: userRes.stderr,
+              diffSummary,
+              exitCode: userRes.exitCode,
+            };
+          }
+        } else {
+          const rawRes = await executeCode(
+            code,
+            selectedLanguage,
+            tc.input,
+            tc.expectedOutput,
+            problem.timeLimit,
+            problem.memoryLimit,
+            judgeConfig,
+            problem.inputFile,
+            problem.outputFile
+          );
+
+          res = {
+            testcaseId: tc.id,
+            testcaseName: tc.name,
+            input: tc.input,
+            expectedOutput: tc.expectedOutput,
+            actualOutput: rawRes.stdout,
+            verdict: rawRes.verdict,
+            timeMs: rawRes.timeMs,
+            memoryKb: rawRes.memoryKb,
+            compileError: rawRes.compileOutput,
+            errorMessage: rawRes.stderr,
+            diffSummary: rawRes.diffSummary,
+            exitCode: rawRes.exitCode,
+          };
+        }
 
         newResults[tc.id] = res;
 
@@ -441,9 +563,10 @@ export const App: React.FC = () => {
         // If compilation error, extract line numbers and stop remaining tests
         if (res.verdict === 'CE') {
           finalVerdict = 'CE';
-          if (rawRes.stderr) {
+          if (res.errorMessage || res.compileError) {
+            const errSource = res.errorMessage || res.compileError || '';
             const ceErrors: CodeDiagnosticError[] = [];
-            const errLines = rawRes.stderr.split('\n');
+            const errLines = errSource.split('\n');
             for (const el of errLines) {
               const m = el.match(/(?:solution\.[a-z0-9]+|main\.[a-z0-9]+|<source>|File "[^"]+", line (\d+)):(\d+):(?:\d+:)?\s*(error|warning)?:\s*(.*)/i);
               if (m) {
@@ -613,6 +736,11 @@ export const App: React.FC = () => {
             aiGenPercent={aiGenPercent}
             aiGenTotalCount={aiGenTotalCount}
             onCancelAiGen={handleCancelAiGen}
+            aiReferenceCode={aiReferenceCode}
+            aiReferenceLangName={aiReferenceLang?.name}
+            hasRandomGenerator={Boolean(aiInputGeneratorJs)}
+            onReRollRandomTests={handleReRollRandomTests}
+            onClearAiReference={handleClearAiReference}
             appTheme={appTheme}
             languageCode={languageCode}
           />
